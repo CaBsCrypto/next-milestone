@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "node --test tests/*.test.ts"
+    "test": "node --no-experimental-require-module --test tests/*.test.ts"
   },
   "dependencies": {
     "@anchor-lang/core": "1.2.2",
@@ -30,7 +30,8 @@
     "vite": "7.3.8"
   },
   "overrides": {
-    "@solana/web3.js": { "jayson": "5.0.0" },
-    "@anchor-lang/core": { "toml": "5.0.1" }
+    "@solana/web3.js": { "jayson": "5.0.0", "rpc-websockets": "9.3.8" },
+    "@anchor-lang/core": { "toml": "5.0.1" },
+    "rpc-websockets": { "uuid": "11.1.1" }
   }
 }
