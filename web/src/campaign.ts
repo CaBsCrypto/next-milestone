@@ -1,22 +1,4 @@
-export const demo = {
-  title: 'Subtítulos para todas las clases',
-  team: 'Equipo Aula Abierta',
-  pitch: 'Una herramienta abierta para que más estudiantes puedan seguir las clases grabadas. El equipo ya tiene una demo y busca financiar las siguientes dos entregas.',
-  milestones: [
-    {
-      title: 'Subtítulos sincronizados',
-      description: 'Reproducir un clip de clase con subtítulos en español sincronizados y un control para activarlos.',
-      amount: 300n,
-    },
-    {
-      title: 'Exportación WebVTT',
-      description: 'Descargar los subtítulos generados y comprobar que otro reproductor los puede abrir.',
-      amount: 700n,
-    },
-  ],
-  evidenceClip: '/evidence/class-subtitles.mp4',
-  captions: '/evidence/class-subtitles.vtt',
-};
+import { MAX_VIDEO_BYTES } from '../shared/proposal';
 
 export type Activity = {
   kind: string;
@@ -24,25 +6,7 @@ export type Activity = {
   amount?: string;
   wallet?: string;
   milestoneIndex?: number;
-};
-
-export type DemoCase = {
-  campaignId: string;
-  vault: string;
-  milestones: [string, string];
-  participants: { creator: string; reviewer: string; arbitrator?: string; contributors: string[] };
-  activities: Activity[];
-  variant: 'expiry' | 'dispute' | 'interactive' | 'funded' | 'sponsor';
-  claimOrder?: string[];
-};
-
-export type DemoManifest = {
-  schemaVersion: 1;
-  cluster: 'devnet';
-  programId: string;
-  mint: string;
-  primaryCampaignId: string;
-  campaigns: DemoCase[];
+  timestamp?: number;
 };
 
 export type Milestone = {
@@ -69,51 +33,26 @@ export type Progress = {
   refunded: bigint;
   refundSnapshot: bigint;
   fundingDeadline: number;
+  deliverySeconds: number;
   status: string;
   contributorCount: number;
   milestones: [Milestone, Milestone];
   walletContribution: { amount: bigint; claimed: boolean } | null;
+  walletBalance?: bigint;
+  nonce: bigint;
 };
 
-export const preview: Progress = {
-  creator: '',
-  reviewer: '',
-  activeMilestone: 1,
-  target: 1000n,
-  contributed: 1000n,
-  paid: 300n,
-  refunded: 700n,
-  refundSnapshot: 700n,
-  fundingDeadline: 0,
-  status: 'refunding',
-  contributorCount: 2,
-  milestones: demo.milestones.map((milestone, index): Milestone => ({
-    index,
-    amount: milestone.amount,
-    status: index === 0 ? 'paid' : 'cancelled',
-    deadline: 0,
-    hardDeadline: 0,
-    evidenceVersion: index === 0 ? 1 : 0,
-    evidenceHash: '',
-    evidenceUri: '',
-    graceUsed: index === 1,
-    disputeOpened: false,
-  })) as [Milestone, Milestone],
-  walletContribution: null,
-};
+const integer = new Intl.NumberFormat('es-CL');
+const dateTime = new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium', timeStyle: 'short' });
 
-export const previewActivity: Activity[] = [
-  { kind: 'contribution', signature: '', wallet: 'Aportante A', amount: '600' },
-  { kind: 'contribution', signature: '', wallet: 'Aportante B', amount: '400' },
-  { kind: 'release', signature: '', wallet: demo.team, amount: '300', milestoneIndex: 0 },
-  { kind: 'refund', signature: '', wallet: 'Aportante A', amount: '420' },
-  { kind: 'refund', signature: '', wallet: 'Aportante B', amount: '280' },
-];
-
-export const token = (amount: bigint) => new Intl.NumberFormat('es-CL').format(amount);
+export const token = (amount: bigint) => integer.format(amount);
 
 export function shortAddress(address: string) {
   return address.length < 30 ? address : `${address.slice(0, 5)}…${address.slice(-5)}`;
+}
+
+export function campaignUrl(address: string) {
+  return `/campanas/${encodeURIComponent(address)}`;
 }
 
 export function explorer(type: 'address' | 'tx', value: string) {
@@ -121,11 +60,10 @@ export function explorer(type: 'address' | 'tx', value: string) {
 }
 
 export function evidenceLink(value: string) {
+  if (!value.trim()) return null;
   try {
     const url = new URL(value, window.location.origin);
-    if (url.protocol === 'https:' || url.origin === window.location.origin && url.protocol === 'http:') {
-      return url.href;
-    }
+    if (!url.username && !url.password && (url.protocol === 'https:' || url.origin === window.location.origin && url.protocol === 'http:')) return url.href;
   } catch {
     return null;
   }
@@ -133,5 +71,14 @@ export function evidenceLink(value: string) {
 }
 
 export function formatDeadline(seconds: number) {
-  return new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium', timeStyle: 'medium' }).format(seconds * 1000);
+  return dateTime.format(seconds * 1000);
+}
+
+export function selectVideo(file?: File) {
+  if (!file) return null;
+  const isMp4 = /\.mp4$/i.test(file.name) && (!file.type || file.type === 'video/mp4');
+  if (!isMp4 || file.size < 12 || file.size > MAX_VIDEO_BYTES) {
+    throw new Error('Selecciona un video MP4 de hasta 100 MB.');
+  }
+  return file.type ? file : new File([file], file.name, { type: 'video/mp4' });
 }

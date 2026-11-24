@@ -128,6 +128,30 @@ pub mod next_milestone {
         Ok(())
     }
 
+    pub fn publish_proposal(
+        ctx: Context<PublishProposal>,
+        sha256: [u8; 32],
+        uri: String,
+    ) -> Result<()> {
+        let campaign = &ctx.accounts.campaign;
+        require!(
+            campaign.status == CampaignStatus::Funding && campaign.total_contributed == 0,
+            EscrowError::WrongState
+        );
+        require!(
+            Clock::get()?.unix_timestamp < campaign.funding_deadline,
+            EscrowError::WindowExpired
+        );
+        CampaignProposal::validate(&sha256, &uri)?;
+        ctx.accounts.proposal.set_inner(CampaignProposal {
+            campaign: campaign.key(),
+            sha256,
+            uri,
+            bump: ctx.bumps.proposal,
+        });
+        Ok(())
+    }
+
     pub fn finalize_funding(ctx: Context<FinalizeFunding>) -> Result<()> {
         let campaign = &mut ctx.accounts.campaign;
         let first = &mut ctx.accounts.first_milestone;
@@ -455,4 +479,6 @@ pub enum EscrowError {
     AlreadyClaimed,
     #[msg("Arithmetic exceeded the permitted bounds.")]
     MathOverflow,
+    #[msg("A proposal must have a nonzero hash and a valid HTTPS URI.")]
+    InvalidProposal,
 }

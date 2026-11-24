@@ -7,9 +7,10 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "check": "node --check src/chain.mjs && node --check src/scenarios.mjs && node --check src/run.mjs",
+    "check": "node --check src/chain.mjs && node --check src/scenarios.mjs && node --check src/run.mjs && node --check src/provision.mjs",
     "test:local": "node src/run.mjs local",
-    "seed:devnet": "node src/run.mjs devnet"
+    "seed:devnet": "node src/run.mjs devnet",
+    "provision:devnet": "node src/provision.mjs"
   },
   "dependencies": {
     "@anchor-lang/core": "1.2.2",

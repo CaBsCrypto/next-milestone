@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
-use crate::{Campaign, Contribution, EscrowError, Milestone};
+use crate::{Campaign, CampaignProposal, Contribution, EscrowError, Milestone};
 
 #[derive(Accounts)]
 #[instruction(nonce: u64)]
@@ -44,6 +44,23 @@ pub struct CreateCampaign<'info> {
     pub vault: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct PublishProposal<'info> {
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    #[account(has_one = creator @ EscrowError::Unauthorized)]
+    pub campaign: Account<'info, Campaign>,
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + CampaignProposal::INIT_SPACE,
+        seeds = [b"proposal", campaign.key().as_ref()],
+        bump
+    )]
+    pub proposal: Account<'info, CampaignProposal>,
     pub system_program: Program<'info, System>,
 }
 

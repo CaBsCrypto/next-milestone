@@ -3,6 +3,7 @@ use anchor_lang::prelude::*;
 use crate::EscrowError;
 
 pub const MAX_EVIDENCE_URI: usize = 160;
+pub const MAX_PROPOSAL_URI: usize = 256;
 const MAX_WINDOW_SECONDS: i64 = 30 * 24 * 60 * 60;
 
 #[account]
@@ -45,6 +46,34 @@ impl Campaign {
         require!(
             self.status == CampaignStatus::Active && self.active_milestone == index,
             EscrowError::WrongState
+        );
+        Ok(())
+    }
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct CampaignProposal {
+    pub campaign: Pubkey,
+    pub sha256: [u8; 32],
+    #[max_len(256)]
+    pub uri: String,
+    pub bump: u8,
+}
+
+impl CampaignProposal {
+    pub fn validate(sha256: &[u8; 32], uri: &str) -> Result<()> {
+        let authority = uri
+            .strip_prefix("https://")
+            .and_then(|rest| rest.split(['/', '?', '#']).next());
+        require!(
+            *sha256 != [0; 32]
+                && uri.len() <= MAX_PROPOSAL_URI
+                && uri
+                    .bytes()
+                    .all(|byte| byte.is_ascii_graphic() && byte != b'\\')
+                && authority.is_some_and(|host| !host.is_empty() && !host.contains('@')),
+            EscrowError::InvalidProposal
         );
         Ok(())
     }

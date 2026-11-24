@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createMint, transfer } from "@solana/spl-token";
 import {
   advance,
   approve,
+  approveAndRelease,
   balance,
   campaignState,
   cancelDispute,
@@ -11,6 +12,7 @@ import {
   clock,
   commitment,
   contribute,
+  deriveCampaign,
   evidence,
   finalize,
   makeFixture,
@@ -18,6 +20,8 @@ import {
   milestoneState,
   openDispute,
   ownerAta,
+  proposalState,
+  publishProposal,
   release,
   waitForClock,
 } from "./chain.mjs";
@@ -75,6 +79,12 @@ async function releaseApproved(fixture, index, evidenceBaseUrl, negativeTests) {
     await assertRejected(
       () => approve(fixture, index, fixture.contributors[1]), "Reviewer authority", "Unauthorized",
     );
+  }
+  if (!fixture.options.arbitration && !negativeTests) {
+    await approveAndRelease(fixture, index);
+    assert.equal(await balance(fixture, creatorAta) - before, index === 0 ? 300n : 700n, "Creator ATA credit");
+    statusIs(await milestoneState(fixture, index), "paid");
+    return;
   }
   await approve(fixture, index);
   if (fixture.options.arbitration) {
@@ -207,8 +217,47 @@ async function completedCampaign(world, evidenceBaseUrl) {
   await assertLedger(fixture, 1_000n, 1_000n, 0n, 0n);
 }
 
+async function proposalPublication(world) {
+  const sha256 = createHash("sha256").update('{"title":"Technical proposal fixture"}').digest();
+  const proposal = { sha256, uri: "https://example.test/campaign.json" };
+  const fixture = await start(world, true, { proposal });
+  statusIs(await campaignState(fixture), "funding");
+  const published = await proposalState(fixture);
+  assert.ok(published.campaign.equals(fixture.campaign));
+  assert.deepEqual(Buffer.from(published.sha256), sha256, "Published proposal SHA-256");
+  assert.equal(published.uri, proposal.uri);
+  await assert.rejects(() => publishProposal(fixture, {
+    ...proposal, uri: "https://example.test/replacement.json",
+  }), (error) => {
+    const logs = (error?.logs ?? error?.transactionLogs ?? []).join("\n");
+    assert.match(logs, /already in use|already initialized/i, "Existing proposal cannot be replaced");
+    return true;
+  });
+  assert.equal((await proposalState(fixture)).uri, proposal.uri, "Immutable URL");
+
+  const legacy = await start(world, true);
+  await assertRejected(
+    () => publishProposal(legacy, proposal, world.contributors[0]), "Proposal creator authority", "Unauthorized",
+  );
+  await contribute(legacy, 0, 1n);
+  await assertRejected(
+    () => publishProposal(legacy, proposal), "A proposal cannot be added after a contribution", "WrongState",
+  );
+  assert.equal(await world.connection.getAccountInfo(legacy.proposal, commitment), null);
+
+  const nonce = randomBytes(8).readBigUInt64LE();
+  const invalid = deriveCampaign(world, nonce);
+  await assertRejected(() => start(world, true, {
+    nonce, proposal: { ...proposal, uri: "http://example.test/insecure.json" },
+  }), "Proposal HTTPS validation", "InvalidProposal");
+  assert.equal(await world.connection.getAccountInfo(invalid.campaign, commitment), null, "Invalid proposal rolls back campaign creation");
+  assert.equal(await world.connection.getAccountInfo(invalid.proposal, commitment), null);
+}
+
 export async function localAcceptance(world, evidenceBaseUrl) {
   const options = { local: true, evidenceBaseUrl };
+  await proposalPublication(world);
+  console.log("PASS · atomic and immutable proposal publication with creator and funding checks");
   await cancelledCase(world, { ...options, order: [0, 1], negativeTests: true });
   console.log("PASS · expiry and claims A → B, rejection of invalid money and roles");
   await cancelledCase(world, { ...options, order: [1, 0] });
@@ -216,7 +265,7 @@ export async function localAcceptance(world, evidenceBaseUrl) {
   await failedFunding(world);
   console.log("PASS · missed target and full refund");
   await completedCampaign(world, evidenceBaseUrl);
-  console.log("PASS · both milestones paid, no refund");
+  console.log("PASS · both milestones approved and paid atomically, no refund");
   await cancelledCase(world, {
     ...options, order: [1, 0], contributors: [333n, 667n], refunds: [233n, 466n], surplus: 13n,
   });

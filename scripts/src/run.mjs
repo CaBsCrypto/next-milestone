@@ -7,8 +7,8 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { clusterApiUrl, Connection, Keypair, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { commitment, devnetGenesis, newWorld } from "./chain.mjs";
+import { clusterApiUrl, Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { commitment, devnetGenesis, newWorld, readTestWallet } from "./chain.mjs";
 import { cancelledCase, localAcceptance } from "./scenarios.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -20,6 +20,7 @@ const { values } = parseArgs({
   options: {
     rpc: { type: "string" },
     wallet: { type: "string" },
+    mint: { type: "string" },
     idl: { type: "string" },
     program: { type: "string" },
     manifest: { type: "string" },
@@ -50,26 +51,33 @@ function evidenceUrl(value) {
   return url;
 }
 
-async function requirePublication(baseUrl) {
+async function loadPublicEvidence(baseUrl) {
   assert.equal(baseUrl.protocol, "https:", "Publish the evidence on HTTPS before seeding Devnet");
+  const evidenceBytes = new Map();
   const files = values["include-dispute"] ? ["hito-1.json", "hito-2.json"] : ["hito-1.json"];
   for (const file of files) {
-    const response = await fetch(new URL(file, baseUrl), { signal: AbortSignal.timeout(15_000) });
+    const uri = new URL(file, baseUrl);
+    assert.ok(Buffer.byteLength(uri.href) <= 160, `Published evidence URL ${file} exceeds the program limit`);
+    const response = await fetch(uri, { redirect: "error", signal: AbortSignal.timeout(15_000) });
     assert.ok(response.ok, `Published evidence ${file} returned HTTP ${response.status}`);
-    const source = await readFile(join(root, "web/public/evidence", file));
-    assert.deepEqual(Buffer.from(await response.arrayBuffer()), source, `Published evidence ${file} differs from the source`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert.ok(bytes.length > 0, `Published evidence ${file} is empty`);
+    JSON.parse(bytes.toString("utf8"));
+    evidenceBytes.set(file, bytes);
   }
+  return evidenceBytes;
 }
 
 async function seedDevnet(idl) {
   assert.ok(values.wallet && values["evidence-base"], "Provide --wallet and --evidence-base");
   const baseUrl = evidenceUrl(values["evidence-base"]);
-  await requirePublication(baseUrl);
+  const evidenceBytes = await loadPublicEvidence(baseUrl);
   const connection = new Connection(values.rpc ?? clusterApiUrl("devnet"), commitment);
   assert.equal(await connection.getGenesisHash(), devnetGenesis, "The RPC must belong to Solana Devnet");
-  const payer = Keypair.fromSecretKey(Uint8Array.from(await json(resolve(values.wallet))));
+  const payer = await readTestWallet(resolve(values.wallet));
   assert.ok(await connection.getBalance(payer.publicKey) >= LAMPORTS_PER_SOL / 10, "Fund the Devnet fee payer before seeding");
-  const world = await newWorld(connection, idl, payer);
+  const existingMint = values.mint ? new PublicKey(values.mint) : undefined;
+  const world = { ...await newWorld(connection, idl, payer, existingMint), evidenceBytes };
   const first = await cancelledCase(world, { order: [0, 1], evidenceBaseUrl: baseUrl, local: false });
   console.log(`Confirmed expiry and refunds A → B · ${first.campaignId}`);
   const second = await cancelledCase(world, { order: [1, 0], evidenceBaseUrl: baseUrl, local: false });
@@ -83,9 +91,8 @@ async function seedDevnet(idl) {
     console.log(`Confirmed objection, cancellation and refunds · ${disputed.campaignId}`);
   }
 
-  const publicIdl = values["public-idl"] ? resolve(values["public-idl"]) : join(root, "web/public/devnet-idl.json");
-  const manifest = values.manifest ? resolve(values.manifest) : join(root, "web/public/demo-manifest.json");
-  await atomicJson(publicIdl, idl);
+  const manifest = values.manifest ? resolve(values.manifest) : join(root, "target/devnet-test-fixtures.json");
+  if (values["public-idl"]) await atomicJson(resolve(values["public-idl"]), idl);
   await atomicJson(manifest, {
     schemaVersion: 1,
     cluster: "devnet",
@@ -94,7 +101,7 @@ async function seedDevnet(idl) {
     primaryCampaignId: first.campaignId,
     campaigns,
   });
-  console.log("Wrote public Devnet addresses and transaction signatures.");
+  console.log("Wrote Devnet technical fixture addresses and signatures.");
 }
 
 async function launchValidator(idl, url) {
@@ -174,7 +181,7 @@ async function testLocal(idl) {
 async function main() {
   if (values.help) {
     console.log("test:local [--idl FILE] [--program FILE] [--rpc EXISTING_LOOPBACK_RPC]");
-    console.log("seed:devnet --wallet FILE --evidence-base HTTPS_URL [--rpc DEVNET_RPC] [--include-dispute]");
+    console.log("seed:devnet --wallet FILE --evidence-base HTTPS_URL [--mint TEST_MINT] [--rpc DEVNET_RPC] [--include-dispute] [--manifest FILE] [--public-idl FILE]");
     return;
   }
   assert.ok(mode === "devnet" || mode === "local", "Choose local or devnet mode");

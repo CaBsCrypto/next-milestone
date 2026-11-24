@@ -1,4 +1,4 @@
 *.sh text eol=lf
 Dockerfile text eol=lf
-*.vtt text eol=lf
-/web/public/evidence/*.json text eol=lf
+/scripts/fixtures/*.json text eol=lf
+/web/public/devnet-idl.json text eol=lf

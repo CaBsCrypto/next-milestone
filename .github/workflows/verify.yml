@@ -7,11 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       deploy_devnet:
-        description: Deploy and seed Solana Devnet after checks pass
+        description: Deploy the program and provision the common Devnet test mint
         type: boolean
         default: false
-      evidence_base:
-        description: Public HTTPS URL of the evidence directory
+      test_mint:
+        description: Existing test mint owned by the fee payer, or blank to create one
         type: string
         required: false
 
@@ -34,7 +34,9 @@ jobs:
       - name: Install Solana toolchain
         run: bash ci/install-solana.sh
       - name: Build the program and generate its IDL
-        run: anchor build
+        run: |
+          anchor build
+          node -e 'const fs = require("node:fs"); const canonical = path => JSON.stringify(JSON.parse(fs.readFileSync(path, "utf8"))); if (canonical("target/idl/next_milestone.json") !== canonical("web/public/devnet-idl.json")) throw new Error("Regenerate web/public/devnet-idl.json with anchor build")'
       - name: Test program rules and transfers
         run: |
           cargo test --workspace --locked
@@ -44,20 +46,20 @@ jobs:
       - name: Build the web app
         run: |
           npm ci --prefix web
+          npm test --prefix web
           npm run build --prefix web
-      - name: Deploy and seed Devnet
+      - name: Deploy on Devnet and provision its token
         if: github.event_name == 'workflow_dispatch' && inputs.deploy_devnet && github.ref == 'refs/heads/main'
         shell: bash
         env:
           DEVNET_PAYER_KEYPAIR: ${{ secrets.DEVNET_PAYER_KEYPAIR }}
           DEVNET_PROGRAM_KEYPAIR: ${{ secrets.DEVNET_PROGRAM_KEYPAIR }}
-          EVIDENCE_BASE: ${{ inputs.evidence_base }}
+          TEST_MINT: ${{ inputs.test_mint }}
           DEVNET: https://api.devnet.solana.com
         run: |
           set -euo pipefail
           : "${DEVNET_PAYER_KEYPAIR:?Set the dedicated Devnet fee payer secret}"
           : "${DEVNET_PROGRAM_KEYPAIR:?Set the dedicated Devnet program keypair secret}"
-          [[ "$EVIDENCE_BASE" == https://* ]]
           [[ "$(solana genesis-hash --url "$DEVNET")" == EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG ]]
           umask 077
           payer="$(mktemp)"
@@ -70,13 +72,6 @@ jobs:
           solana-keygen new --no-bip39-passphrase --silent --force --outfile "$buffer" >/dev/null
           solana program deploy --url "$DEVNET" --keypair "$payer" --program-id "$program" \
             --buffer "$buffer" target/deploy/next_milestone.so
-          npm run seed:devnet --prefix scripts -- --wallet "$payer" --evidence-base "$EVIDENCE_BASE" --include-dispute
-      - name: Upload public Devnet manifests
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy_devnet && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v6
-        with:
-          name: next-milestone-devnet
-          path: |
-            web/public/demo-manifest.json
-            web/public/devnet-idl.json
-          if-no-files-found: error
+          mint_args=()
+          if [[ -n "$TEST_MINT" ]]; then mint_args+=(--mint "$TEST_MINT"); fi
+          npm run provision:devnet --prefix scripts -- --wallet "$payer" "${mint_args[@]}"

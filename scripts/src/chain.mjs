@@ -8,6 +8,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createMint,
   getAssociatedTokenAddressSync,
+  getMint,
   getOrCreateAssociatedTokenAccount,
   mintTo,
 } from "@solana/spl-token";
@@ -26,6 +27,18 @@ const { BN, Program } = anchor;
 
 export const commitment = "confirmed";
 export const devnetGenesis = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+
+export async function readTestWallet(path) {
+  try {
+    const bytes = JSON.parse(await readFile(path, "utf8"));
+    assert.ok(Array.isArray(bytes) && bytes.length === 64);
+    assert.ok(bytes.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255));
+    return Keypair.fromSecretKey(Uint8Array.from(bytes));
+  } catch {
+    throw new Error("Unable to load the test wallet keypair. Check the wallet file path and format.");
+  }
+}
+
 export function amount(value) {
   return new BN(value.toString());
 }
@@ -50,11 +63,20 @@ export async function waitForClock(connection, deadline) {
   }
 }
 
-export async function newWorld(connection, idl, payer) {
+export async function requireTestMint(connection, mint, authority) {
+  const account = await getMint(connection, mint, commitment);
+  assert.ok(
+    account.decimals === 0 && account.freezeAuthority === null && account.mintAuthority?.equals(authority),
+    "The test mint must have zero decimals, no freeze authority and the specified wallet as mint authority",
+  );
+}
+
+export async function newWorld(connection, idl, payer, existingMint) {
   const program = new Program(idl, { connection });
   const onChainProgram = await connection.getAccountInfo(program.programId, commitment);
   assert.ok(onChainProgram?.executable, "IDL program is not executable at this RPC");
 
+  if (existingMint) await requireTestMint(connection, existingMint, payer.publicKey);
   const reviewer = Keypair.generate();
   const arbitrator = Keypair.generate();
   const contributors = [Keypair.generate(), Keypair.generate()];
@@ -67,7 +89,7 @@ export async function newWorld(connection, idl, payer) {
     connection, new Transaction().add(...contributorFunding), [payer], { commitment },
   );
   const balances = new Map();
-  const mint = await createMint(connection, payer, payer.publicKey, null, 0, undefined, { commitment });
+  const mint = existingMint ?? await createMint(connection, payer, payer.publicKey, null, 0, undefined, { commitment });
   for (const owner of [payer, ...contributors]) {
     const ata = await getOrCreateAssociatedTokenAccount(
       connection, payer, mint, owner.publicKey, false, commitment, { commitment },
@@ -90,6 +112,7 @@ export function deriveCampaign(world, nonce) {
   nonceSeed.writeBigUInt64LE(nonce);
   const programId = world.program.programId;
   const campaign = pda(programId, Buffer.from("campaign"), world.payer.publicKey.toBuffer(), nonceSeed);
+  const proposal = pda(programId, Buffer.from("proposal"), campaign.toBuffer());
   const milestones = [0, 1].map((index) =>
     pda(programId, Buffer.from("milestone"), campaign.toBuffer(), Buffer.from([index])),
   );
@@ -97,14 +120,14 @@ export function deriveCampaign(world, nonce) {
     pda(programId, Buffer.from("contribution"), campaign.toBuffer(), owner.publicKey.toBuffer()),
   );
   const vault = getAssociatedTokenAddressSync(world.mint, campaign, true);
-  return { campaign, milestones, contributions, vault };
+  return { campaign, proposal, milestones, contributions, vault };
 }
 
 export async function makeFixture(world, options) {
-  const { nonce, deadline, windows, arbitration = false } = options;
+  const { nonce, deadline, windows, proposal, arbitration = false } = options;
   const ids = deriveCampaign(world, nonce);
   const fixture = { ...world, ...ids, options, activities: [], transactionNumber: 0 };
-  const createSignature = await call(fixture, "createCampaign", [
+  const create = await instruction(fixture, "createCampaign", [
     amount(nonce),
     amount(1_000),
     [amount(300), amount(700)],
@@ -123,22 +146,47 @@ export async function makeFixture(world, options) {
     associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
     systemProgram: SystemProgram.programId,
   });
+  const instructions = [create];
+  if (proposal) instructions.push(await proposalInstruction(fixture, proposal, world.payer));
+  const createSignature = await sendInstructions(fixture, instructions);
   note(fixture, "create", createSignature);
+  if (proposal) note(fixture, "proposal", createSignature);
   return fixture;
 }
 
-export async function call(fixture, method, args, accounts, signer = fixture.payer) {
-  const instruction = await fixture.program.methods[method](...args).accountsStrict(accounts).instruction();
+function instruction(fixture, method, args, accounts) {
+  return fixture.program.methods[method](...args).accountsStrict(accounts).instruction();
+}
+
+function sendInstructions(fixture, instructions, signer = fixture.payer) {
   const signers = signer.publicKey.equals(fixture.payer.publicKey) ? [fixture.payer] : [fixture.payer, signer];
   return sendAndConfirmTransaction(
     fixture.connection,
     new Transaction().add(
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: fixture.transactionNumber++ }),
-      instruction,
+      ...instructions,
     ),
     signers,
     { commitment, preflightCommitment: commitment },
   );
+}
+
+export async function call(fixture, method, args, accounts, signer = fixture.payer) {
+  return sendInstructions(fixture, [await instruction(fixture, method, args, accounts)], signer);
+}
+
+function proposalInstruction(fixture, { sha256, uri }, signer) {
+  return instruction(fixture, "publishProposal", [[...sha256], uri], {
+    creator: signer.publicKey,
+    campaign: fixture.campaign,
+    proposal: fixture.proposal,
+    systemProgram: SystemProgram.programId,
+  });
+}
+
+export async function publishProposal(fixture, proposal, signer = fixture.payer) {
+  const ix = await proposalInstruction(fixture, proposal, signer);
+  return sendInstructions(fixture, [ix], signer);
 }
 
 export function note(fixture, kind, signature, data = {}) {
@@ -186,7 +234,8 @@ export function milestoneAccounts(fixture, index) {
 export async function evidence(fixture, index, baseUrl, signer = fixture.payer) {
   const filename = `hito-${index + 1}.json`;
   const uri = new URL(filename, baseUrl).href;
-  const data = await readFile(new URL(`../../web/public/evidence/${filename}`, import.meta.url));
+  const data = fixture.evidenceBytes?.get(filename)
+    ?? await readFile(new URL(`../fixtures/${filename}`, import.meta.url));
   const hash = createHash("sha256").update(data).digest();
   const signature = await call(fixture, "submitEvidence", [index, [...hash], uri], {
     creator: signer.publicKey,
@@ -203,6 +252,17 @@ export async function approve(fixture, index, signer = fixture.reviewer) {
   note(fixture, "approval", signature, { milestoneIndex: index });
 }
 
+export async function approveAndRelease(fixture, index) {
+  const review = await instruction(fixture, "reviewMilestone", [index, 1, variant("approve")], {
+    reviewer: fixture.reviewer.publicKey,
+    ...milestoneAccounts(fixture, index),
+  });
+  const payout = await releaseInstruction(fixture, index, fixture.payer.publicKey, fixture.reviewer.publicKey);
+  const signature = await sendInstructions(fixture, [review, payout], fixture.reviewer);
+  note(fixture, "approval", signature, { milestoneIndex: index });
+  noteRelease(fixture, index, fixture.payer.publicKey, signature);
+}
+
 export async function advance(fixture, index) {
   const signature = await call(
     fixture, "advanceExpired", [index], milestoneAccounts(fixture, index),
@@ -210,9 +270,9 @@ export async function advance(fixture, index) {
   note(fixture, "advance", signature, { milestoneIndex: index });
 }
 
-export async function release(fixture, index, recipient = fixture.payer.publicKey) {
-  const signature = await call(fixture, "releaseMilestone", [index], {
-    executor: fixture.payer.publicKey,
+function releaseInstruction(fixture, index, recipient, executor) {
+  return instruction(fixture, "releaseMilestone", [index], {
+    executor,
     ...milestoneAccounts(fixture, index),
     nextMilestone: fixture.milestones[index + 1] ?? null,
     recipient,
@@ -223,7 +283,16 @@ export async function release(fixture, index, recipient = fixture.payer.publicKe
     associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
     systemProgram: SystemProgram.programId,
   });
+}
+
+function noteRelease(fixture, index, recipient, signature) {
   note(fixture, "release", signature, { milestoneIndex: index, wallet: recipient.toBase58(), amount: index === 0 ? "300" : "700" });
+}
+
+export async function release(fixture, index, recipient = fixture.payer.publicKey) {
+  const payout = await releaseInstruction(fixture, index, recipient, fixture.payer.publicKey);
+  const signature = await sendInstructions(fixture, [payout]);
+  noteRelease(fixture, index, recipient, signature);
 }
 
 export async function claim(fixture, index, value) {
@@ -265,6 +334,10 @@ export async function cancelDispute(fixture, index) {
 
 export function campaignState(fixture) {
   return fixture.program.account.campaign.fetch(fixture.campaign, commitment);
+}
+
+export function proposalState(fixture) {
+  return fixture.program.account.campaignProposal.fetch(fixture.proposal, commitment);
 }
 
 export function milestoneState(fixture, index) {
