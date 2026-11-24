@@ -41,6 +41,12 @@ export function jsonResponse(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { 'cache-control': 'no-store' } });
 }
 
+export function methodNotAllowed(allow: string): Response {
+  const response = jsonResponse({ error: 'El método no está permitido.' }, 405);
+  response.headers.set('allow', allow);
+  return response;
+}
+
 export function errorResponse(error: unknown): Response {
   if (error instanceof ApiError) return jsonResponse({ error: error.message }, error.status);
   return jsonResponse({ error: 'No se pudo completar la carga. Intenta nuevamente.' }, 502);
