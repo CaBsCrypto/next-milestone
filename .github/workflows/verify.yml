@@ -38,7 +38,7 @@ jobs:
       - name: Test program rules and transfers
         run: |
           cargo test --workspace --locked
-          npm ci --prefix scripts
+          npm ci --ignore-scripts --prefix scripts
           npm run check --prefix scripts
           npm run test:local --prefix scripts
       - name: Build the web app

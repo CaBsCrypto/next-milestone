@@ -1,7 +1,7 @@
 import { BN, type Idl, Program, type Provider, utils } from '@anchor-lang/core';
-import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { Connection, PublicKey, SystemProgram, type Transaction } from '@solana/web3.js';
 import type { DemoCase, DemoManifest, Milestone, Progress } from './campaign';
+import { ASSOCIATED_TOKEN_PROGRAM_ID, associatedTokenAddress, TOKEN_PROGRAM_ID } from './tokenAddress';
 
 export type BrowserWallet = {
   publicKey: PublicKey | null;
@@ -80,7 +80,10 @@ export type Client = {
   mint: PublicKey;
   vault: PublicKey;
   milestones: PublicKey[];
+  devnetCheck?: Promise<void>;
 };
+
+const SOLANA_DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 
 async function fetchPublicJson(path: string): Promise<unknown | null> {
   const response = await fetch(path, { cache: 'no-cache' });
@@ -116,6 +119,16 @@ export function createClient(manifest: DemoManifest, campaign: DemoCase, idl: Id
   };
 }
 
+function verifyDevnet(client: Client) {
+  client.devnetCheck ??= client.connection.getGenesisHash().then((genesisHash) => {
+    if (genesisHash !== SOLANA_DEVNET_GENESIS_HASH) throw new Error('El RPC configurado no corresponde a Solana Devnet.');
+  }).catch((error: unknown) => {
+    client.devnetCheck = undefined;
+    throw error;
+  });
+  return client.devnetCheck;
+}
+
 const asBigInt = (value: BN) => BigInt(value.toString());
 const status = (value: StateEnum) => Object.keys(value)[0];
 const fromHash = (value: number[]) => Array.from(value, (n) => n.toString(16).padStart(2, '0')).join('');
@@ -143,6 +156,7 @@ function normalizeMilestone(raw: MilestoneAccount): Milestone {
 }
 
 export async function readProgress(client: Client, walletAddress?: string): Promise<Progress> {
+  await verifyDevnet(client);
   const accounts = client.program.account as unknown as Accounts;
   const [campaign, milestones, contribution] = await Promise.all([
     accounts.campaign.fetch(client.campaign),
@@ -180,7 +194,7 @@ function prepareTransaction(client: Client, signer: PublicKey, progress: Progres
   const tokenProgram = TOKEN_PROGRAM_ID;
   const systemProgram = SystemProgram.programId;
   const associatedTokenProgram = ASSOCIATED_TOKEN_PROGRAM_ID;
-  const ata = (owner: PublicKey) => getAssociatedTokenAddressSync(mint, owner);
+  const ata = (owner: PublicKey) => associatedTokenAddress(mint, owner);
   const variant = (decision: string) => ({ [decision]: {} });
   const milestone = 'index' in action ? milestones[action.index] : milestones[0];
   switch (action.kind) {
@@ -228,6 +242,7 @@ function prepareTransaction(client: Client, signer: PublicKey, progress: Progres
 export async function sendAction(
   client: Client, wallet: BrowserWallet, address: string, progress: Progress, action: Action, onSend: (pending: PendingSignature) => void,
 ) {
+  await verifyDevnet(client);
   const signer = new PublicKey(address);
   if (!wallet.publicKey?.equals(signer)) throw new Error('La wallet cambió. Conéctala de nuevo.');
   const [transaction, block] = await Promise.all([
@@ -248,6 +263,7 @@ export async function sendAction(
 }
 
 export async function readPendingSignature(client: Client, pending: PendingSignature) {
+  await verifyDevnet(client);
   const { value: [record] } = await client.connection.getSignatureStatuses([pending.signature], { searchTransactionHistory: true });
   if (record?.err) return 'rejected';
   if (record?.confirmationStatus === 'confirmed' || record?.confirmationStatus === 'finalized') return 'confirmed';

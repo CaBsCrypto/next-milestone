@@ -10,7 +10,7 @@ La [ficha pública](https://next-milestone-chi.vercel.app/) abre sin wallet. Cua
 
 | Dato | Cómo verificarlo |
 | --- | --- |
-| Program ID | [Programa Next Milestone en Explorer (Devnet)](https://explorer.solana.com/address/G5TYizzLmGWWbcEYhUgz8pdZupqgHKRkiKszz3UUPaHk?cluster=devnet) |
+| Program ID de la compilación | [Consultar estado del programa en Explorer (Devnet)](https://explorer.solana.com/address/G5TYizzLmGWWbcEYhUgz8pdZupqgHKRkiKszz3UUPaHk?cluster=devnet) |
 | Campaign, vault, mint y firmas | `web/public/demo-manifest.json`, generado por la semilla después de confirmar las transacciones |
 | IDL de la web | `web/public/devnet-idl.json`, copiada desde la compilación usada para el despliegue |
 
@@ -21,7 +21,7 @@ Usa Linux o WSL con Anchor **1.2.2**, Agave **4.1.2**, Rust **1.96.0** y Node **
 ```bash
 anchor build
 cargo test --workspace --locked
-npm ci --prefix scripts
+npm ci --ignore-scripts --prefix scripts
 npm run check --prefix scripts
 npm run test:local --prefix scripts
 npm ci --prefix web
@@ -29,16 +29,21 @@ npm run build --prefix web
 npm run dev --prefix web
 ```
 
-En Windows con Docker Desktop en modo Linux, la siguiente secuencia compila y ejecuta las pruebas del programa desde PowerShell.
+En Windows con Docker Desktop en modo Linux, PowerShell puede compilar el programa y ejecutar las pruebas. Agave 4.1.2 necesita las llamadas `io_uring`, por lo que el contenedor de prueba usa el perfil oficial de Docker con esas llamadas adicionales, red aislada y sin capacidades adicionales.
 
 ```powershell
 docker build -f ci/Dockerfile -t next-milestone/solana-toolchain:1.2.2 .
 docker run --rm --mount "type=bind,source=$($PWD.Path),target=/workspace" `
   --mount 'type=volume,source=next-milestone-scripts-deps,target=/workspace/scripts/node_modules' `
-  next-milestone/solana-toolchain:1.2.2 bash -c 'set -e; anchor build; npm ci --prefix scripts; npm run test:local --prefix scripts'
+  next-milestone/solana-toolchain:1.2.2 bash -c 'set -e; anchor build; npm ci --ignore-scripts --prefix scripts'
+$validatorProfilePath = & ./ci/docker-validator-profile.ps1
+docker run --rm --network none --cap-drop ALL --security-opt "seccomp=$validatorProfilePath" `
+  --mount "type=bind,source=$($PWD.Path),target=/workspace,readonly" `
+  --mount 'type=volume,source=next-milestone-scripts-deps,target=/workspace/scripts/node_modules,readonly' `
+  next-milestone/solana-toolchain:1.2.2 npm run test:local --prefix scripts
 ```
 
-La suite local levanta su propio validador y comprueba estados, destinos, vencimientos y balances SPL. La hora para el programa viene de `Clock`. Una aprobación válida deja el hito pagable hasta que se ejecute su desembolso. Las cantidades se manejan en unidades atómicas por toda la ruta.
+La suite local levanta su propio validador y comprueba estados, destinos, vencimientos y balances SPL. La aceptación local pasó en ambos órdenes de reclamo, con saldo final registrado de cero. Las pruebas también cubren el pago de los dos hitos, la meta fallida, el redondeo, la disputa, el silencio del revisor y del árbitro y el rechazo de cobros duplicados. La hora para el programa viene de `Clock`. Una aprobación válida deja el hito pagable hasta que se ejecute su desembolso. Las cantidades se manejan en unidades atómicas por toda la ruta.
 
 ## Desplegar en Devnet y recrear la campaña
 

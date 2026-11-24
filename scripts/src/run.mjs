@@ -108,12 +108,12 @@ async function launchValidator(idl, url) {
     "--bind-address", "127.0.0.1",
     "--rpc-port", url.port,
     "--bpf-program", idl.address, executable,
-    "--quiet",
+    "--log",
   ], { stdio: ["ignore", "pipe", "pipe"] });
   let failure;
   let validatorOutput = "";
   child.on("error", (error) => { failure = error; });
-  const collectOutput = (chunk) => { validatorOutput = (validatorOutput + chunk).slice(-2_000); };
+  const collectOutput = (chunk) => { validatorOutput = (validatorOutput + chunk).slice(-6_000); };
   child.stdout.on("data", collectOutput);
   child.stderr.on("data", collectOutput);
   const cleanup = async () => {
@@ -164,6 +164,9 @@ async function testLocal(idl) {
     const world = await newWorld(connection, idl, payer);
     await localAcceptance(world, evidenceUrl(values["evidence-base"] ?? "http://127.0.0.1:4173/evidence/"));
   } finally {
+    // web3.js closes idle signature subscriptions after 500 ms. Keep the
+    // validator available until the connection can close without reconnecting.
+    if (!values.rpc) await delay(750);
     await cleanup();
   }
 }

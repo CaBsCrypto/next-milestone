@@ -3,7 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "engines": { "node": ">=22.12.0" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -11,7 +13,6 @@
   },
   "dependencies": {
     "@anchor-lang/core": "1.2.2",
-    "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "1.98.4",
     "buffer": "6.0.3",
     "lucide-react": "0.548.0",
@@ -23,6 +24,10 @@
     "@types/react-dom": "19.2.2",
     "@vitejs/plugin-react": "5.1.1",
     "typescript": "5.9.3",
-    "vite": "7.3.1"
+    "vite": "7.3.8"
+  },
+  "overrides": {
+    "@solana/web3.js": { "jayson": "5.0.0" },
+    "@anchor-lang/core": { "toml": "5.0.1" }
   }
 }
