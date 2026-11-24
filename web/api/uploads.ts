@@ -1,6 +1,6 @@
 import { issueSignedToken, presignUrl } from '@vercel/blob';
 import { MAX_VIDEO_BYTES } from '../shared/proposal.ts';
-import { errorResponse, jsonResponse, requestJson } from '../server/apiResponses.ts';
+import { errorResponse, jsonResponse, methodNotAllowed, requestJson } from '../server/apiResponses.ts';
 import {
   ApiError, asObject, authorizeEvidence, challengeSecret, issueChallenge, isUploadScope, mediaPath,
   parseScope, requestOrigin, storageConfigured, verifyChallenge,
@@ -9,11 +9,7 @@ import {
 const VIDEO_CONTENT_TYPES = ['video/mp4'];
 const UPLOAD_LIFETIME = 20 * 60 * 1_000;
 
-export function GET(): Response {
-  return jsonResponse({ configured: storageConfigured() });
-}
-
-export async function POST(request: Request): Promise<Response> {
+async function post(request: Request): Promise<Response> {
   try {
     const origin = requestOrigin(request);
     const secret = challengeSecret();
@@ -35,3 +31,11 @@ export async function POST(request: Request): Promise<Response> {
     return errorResponse(error);
   }
 }
+
+export default {
+  fetch(request: Request): Response | Promise<Response> {
+    if (request.method === 'GET') return jsonResponse({ configured: storageConfigured() });
+    if (request.method === 'POST') return post(request);
+    return methodNotAllowed('GET, POST');
+  },
+};

@@ -2,6 +2,8 @@ import { deepEqual, equal, rejects, throws } from 'node:assert/strict';
 import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { test } from 'node:test';
 import { PublicKey } from '@solana/web3.js';
+import proposalRoute from '../api/proposal.ts';
+import uploadRoute from '../api/uploads.ts';
 import { parseMilestoneEvidence, serializeMilestoneEvidence } from '../shared/evidence.ts';
 import { campaignAddress } from '../shared/proposal.ts';
 import { uploadCampaignVideo } from '../src/uploads.ts';
@@ -13,6 +15,18 @@ import {
 const ORIGIN = 'https://next-milestone.example';
 const SECRET = Buffer.from('test-only-secret');
 const NOW = 1_800_000_000_000;
+
+test('the public function entrypoints handle health checks and reject unsupported methods', async () => {
+  const health = await uploadRoute.fetch(new Request(`${ORIGIN}/api/uploads`));
+  equal(health.status, 200);
+  equal(typeof (await health.json()).configured, 'boolean');
+  const uploadMethod = await uploadRoute.fetch(new Request(`${ORIGIN}/api/uploads`, { method: 'DELETE' }));
+  equal(uploadMethod.status, 405);
+  equal(uploadMethod.headers.get('allow'), 'GET, POST');
+  const proposalMethod = await proposalRoute.fetch(new Request(`${ORIGIN}/api/proposal`));
+  equal(proposalMethod.status, 405);
+  equal(proposalMethod.headers.get('allow'), 'POST');
+});
 
 function wallet() {
   const pair = generateKeyPairSync('ed25519');

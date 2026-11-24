@@ -1,6 +1,6 @@
 import { parseMilestoneEvidence, serializeMilestoneEvidence } from '../shared/evidence.ts';
 import { parseCampaignProposal, serializeCampaignProposal } from '../shared/proposal.ts';
-import { errorResponse, jsonResponse, requestJson } from '../server/apiResponses.ts';
+import { errorResponse, jsonResponse, methodNotAllowed, requestJson } from '../server/apiResponses.ts';
 import { documentDigest, publishDocument, verifyVideoUpload } from '../server/publishedFiles.ts';
 import {
   ApiError, asObject, authorizeEvidence, challengeSecret, parseScope, requestOrigin, requireSameScope, verifyChallenge,
@@ -14,7 +14,7 @@ function parseDocument<T>(parser: (value: unknown) => T, value: unknown): T {
   }
 }
 
-export async function POST(request: Request): Promise<Response> {
+async function post(request: Request): Promise<Response> {
   try {
     const origin = requestOrigin(request);
     const secret = challengeSecret();
@@ -53,3 +53,9 @@ export async function POST(request: Request): Promise<Response> {
     return errorResponse(error);
   }
 }
+
+export default {
+  fetch(request: Request): Response | Promise<Response> {
+    return request.method === 'POST' ? post(request) : methodNotAllowed('POST');
+  },
+};
