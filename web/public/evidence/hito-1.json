@@ -1,0 +1,21 @@
+{
+  "campaign": "Caption Lab",
+  "milestone": 1,
+  "version": 1,
+  "title": "Subtítulos sincronizados para una clase",
+  "claim": "El reproductor muestra tres subtítulos en español sobre una lección breve en inglés.",
+  "files": {
+    "clip": "class-subtitles.mp4",
+    "captions": "class-subtitles.vtt"
+  },
+  "sha256": {
+    "class-subtitles.mp4": "23d9188449f7c6a225f54b836bb92a76e9f5fa58fdc108adc7b9711f6616d47f",
+    "class-subtitles.vtt": "d7e8565084ac5d116b8a46bb51be54368a970c0781dfa041ef615ba175e6dc03"
+  },
+  "acceptanceChecks": [
+    "Reproducir el clip con la pista Español activada.",
+    "Verificar que los subtítulos describen definición, amplitud y período al escuchar cada sección.",
+    "Confirmar que el último subtítulo termina antes de que acabe el clip."
+  ],
+  "provenance": "Campaign and educational clip created for the Next Milestone demonstration. The script and captions are original."
+}

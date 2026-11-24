@@ -1,0 +1,4 @@
+**
+!ci/
+!ci/Dockerfile
+!ci/install-solana.sh

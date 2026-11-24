@@ -1,0 +1,9 @@
+[workspace]
+members = ["programs/next-milestone"]
+resolver = "2"
+
+[profile.release]
+overflow-checks = true
+strip = true
+lto = "fat"
+codegen-units = 1

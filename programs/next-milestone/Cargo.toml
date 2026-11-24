@@ -1,0 +1,26 @@
+[package]
+name = "next-milestone"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "next_milestone"
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "anchor-spl/token_2022"]
+anchor-debug = ["anchor-lang/anchor-debug", "anchor-spl/anchor-debug"]
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { version = "=1.2.2", features = ["init-if-needed"] }
+anchor-spl = { version = "=1.2.2", default-features = false, features = ["associated_token", "solana-v3", "token"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
